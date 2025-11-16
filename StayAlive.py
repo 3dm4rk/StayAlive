@@ -27,6 +27,7 @@ class InactivityShutdownApp:
         self.is_counting = False
         self.running = True
         self.notification_window = None
+        self.fullscreen_window = None
         
         # Setup GUI
         self.setup_gui()
@@ -49,9 +50,9 @@ class InactivityShutdownApp:
         
         # Instructions
         instructions = (
-            "This program will shut down your computer if no mouse or keyboard\n"
-            "activity is detected for 1 minute, followed by no button click for 3 minutes.\n"
-            "Click the button below to prevent shutdown."
+            "This program will show a full-screen countdown if no mouse or keyboard\n"
+            "activity is detected for 1 minute, followed by shutdown in 3 minutes.\n"
+            "Move your mouse or press any key to cancel the countdown."
         )
         instr_label = ttk.Label(main_frame, text=instructions, justify=tk.CENTER)
         instr_label.grid(row=1, column=0, columnspan=2, pady=(0, 20))
@@ -62,15 +63,10 @@ class InactivityShutdownApp:
                                        font=("Arial", 14), foreground="green")
         self.countdown_label.grid(row=2, column=0, columnspan=2, pady=(0, 30))
         
-        # Active button
-        self.active_button = ttk.Button(main_frame, text="I'm Active!", 
-                                       command=self.button_clicked, state=tk.DISABLED)
-        self.active_button.grid(row=3, column=0, columnspan=2, pady=(0, 20))
-        
         # Status label
         self.status_var = tk.StringVar(value="Monitoring for inactivity...")
         status_label = ttk.Label(main_frame, textvariable=self.status_var)
-        status_label.grid(row=4, column=0, columnspan=2)
+        status_label.grid(row=3, column=0, columnspan=2)
         
         # Configure grid weights
         self.root.columnconfigure(0, weight=1)
@@ -95,13 +91,76 @@ class InactivityShutdownApp:
         if self.is_counting:
             self.reset_countdown()
     
-    def button_clicked(self):
-        self.reset_countdown()
-        self.show_notification("Activity Confirmed", "Shutdown cancelled! Continue working.", "green")
+    def create_fullscreen_countdown(self):
+        # Create fullscreen window
+        self.fullscreen_window = tk.Toplevel(self.root)
+        self.fullscreen_window.attributes('-fullscreen', True)
+        self.fullscreen_window.configure(bg='black')
+        self.fullscreen_window.attributes('-topmost', True)
+        
+        # Bind escape key and mouse click to close fullscreen
+        self.fullscreen_window.bind('<Escape>', lambda e: self.reset_countdown())
+        self.fullscreen_window.bind('<Button-1>', lambda e: self.reset_countdown())
+        self.fullscreen_window.bind('<Key>', lambda e: self.reset_countdown())
+        
+        # Create main frame
+        main_frame = tk.Frame(self.fullscreen_window, bg='black')
+        main_frame.pack(expand=True, fill='both')
+        
+        # Warning message
+        warning_text = "INACTIVITY DETECTED"
+        warning_label = tk.Label(main_frame, text=warning_text, 
+                                font=("Arial", 36, "bold"), 
+                                fg="#FF4444", bg="black")
+        warning_label.pack(pady=(100, 50))
+        
+        # Countdown display
+        self.fullscreen_countdown_var = tk.StringVar(value="03:00")
+        countdown_label = tk.Label(main_frame, 
+                                  textvariable=self.fullscreen_countdown_var,
+                                  font=("Digital-7", 120, "bold"),
+                                  fg="#00FFAA", bg="black")
+        countdown_label.pack(pady=(0, 50))
+        
+        # Instruction text
+        instruction_text = "Move mouse or press any key to cancel shutdown"
+        instruction_label = tk.Label(main_frame, text=instruction_text,
+                                    font=("Arial", 24),
+                                    fg="#CCCCCC", bg="black")
+        instruction_label.pack(pady=(50, 0))
+        
+        # Pulsating effect variables
+        self.pulse_direction = -1
+        self.pulse_value = 100
+        
+        # Start pulsing animation
+        self.pulse_countdown()
+    
+    def pulse_countdown(self):
+        if self.fullscreen_window and self.is_counting:
+            # Update pulse value
+            self.pulse_value += self.pulse_direction * 5
+            if self.pulse_value <= 50 or self.pulse_value >= 100:
+                self.pulse_direction *= -1
+            
+            # Update color with pulse effect
+            pulse_color = f"#{int(self.pulse_value/100*255):02x}FF{int(self.pulse_value/100*170+85):02x}"
+            self.fullscreen_window.children['!frame'].children['!label2'].configure(fg=pulse_color)
+            
+            # Continue pulsing
+            self.fullscreen_window.after(100, self.pulse_countdown)
     
     def reset_countdown(self):
         self.is_counting = False
-        self.active_button.config(state=tk.DISABLED)
+        
+        # Close fullscreen window if open
+        if self.fullscreen_window:
+            try:
+                self.fullscreen_window.destroy()
+                self.fullscreen_window = None
+            except:
+                pass
+        
         self.countdown_var.set("System active")
         self.countdown_label.configure(foreground="green")
         self.status_var.set("Monitoring for inactivity...")
@@ -209,13 +268,15 @@ class InactivityShutdownApp:
             if inactivity_period >= self.inactivity_threshold:
                 self.is_counting = True
                 self.shutdown_time = current_time + self.shutdown_threshold
-                self.active_button.config(state=tk.NORMAL)
-                self.status_var.set("Warning: Inactivity detected! Click the button to prevent shutdown.")
+                self.status_var.set("Warning: Inactivity detected! Fullscreen countdown activated.")
+                
+                # Create fullscreen countdown
+                self.create_fullscreen_countdown()
+                
                 # Show notification
                 self.show_notification("Inactivity Alert", 
                                       "No mouse or keyboard activity detected for 1 minute.\n\n"
-                                      "Click the 'I'm Active!' button in the main window to prevent "
-                                      "automatic shutdown in 3 minutes.")
+                                      "Move your mouse or press any key to cancel the shutdown countdown.")
         
         if self.is_counting:
             time_remaining = self.shutdown_time - current_time
@@ -224,14 +285,20 @@ class InactivityShutdownApp:
             else:
                 # Format time as MM:SS
                 minutes, seconds = divmod(int(time_remaining), 60)
-                self.countdown_var.set(f"Time until shutdown: {minutes:02d}:{seconds:02d}")
+                countdown_text = f"{minutes:02d}:{seconds:02d}"
+                self.countdown_var.set(f"Time until shutdown: {countdown_text}")
+                
+                # Update fullscreen countdown if active
+                if self.fullscreen_window:
+                    self.fullscreen_countdown_var.set(countdown_text)
+                
                 self.countdown_label.configure(foreground="red")
                 
                 # Show urgent notification when less than 30 seconds remain
                 if time_remaining < 30 and int(time_remaining) % 5 == 0:
                     self.show_notification("URGENT: Shutdown Imminent", 
                                          f"Only {int(time_remaining)} seconds until shutdown!\n\n"
-                                         "Click the 'I'm Active!' button immediately to cancel.", "red")
+                                         "Move your mouse or press any key immediately to cancel.", "red")
         
         # Check again after 1 second
         self.root.after(1000, self.check_inactivity)
